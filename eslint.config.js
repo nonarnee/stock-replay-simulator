@@ -1,5 +1,3 @@
-import { fileURLToPath } from 'node:url';
-
 import js from '@eslint/js';
 import prettier from 'eslint-config-prettier';
 import pluginImport from 'eslint-plugin-import';
