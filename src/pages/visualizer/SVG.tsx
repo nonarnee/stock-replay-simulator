@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 
 import styled from '@emotion/styled';
 import { subHours, format } from 'date-fns';
@@ -126,7 +126,7 @@ const Slider = styled.input`
   width: 150px;
 `;
 
-const SVGVisualizerPage: React.FC = () => {
+export default function SVGVisualizerPage() {
   // 상태 관리
   const [chartData, setChartData] = useState<OHLCData[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -139,6 +139,8 @@ const SVGVisualizerPage: React.FC = () => {
 
   // 차트 데이터 로드
   useEffect(() => {
+    let isMounted = true;
+
     const loadData = async () => {
       setLoading(true);
 
@@ -153,7 +155,7 @@ const SVGVisualizerPage: React.FC = () => {
           'minute'
         );
 
-        if (response.success && response.data.length > 0) {
+        if (isMounted && response.success && response.data.length > 0) {
           setChartData(response.data);
 
           // 시작 및 종료 시간 설정
@@ -162,149 +164,147 @@ const SVGVisualizerPage: React.FC = () => {
 
           // 초기 현재 시간을 시작 시간으로 설정
           setCurrentTime(response.data[0].timestamp);
-        } else {
+        } else if (isMounted) {
           setError('데이터를 로드하는 중 오류가 발생했습니다.');
         }
       } catch (err) {
-        setError('데이터를 요청하는 중 예상치 못한 오류가 발생했습니다.');
-        console.error(err);
+        if (isMounted) {
+          setError('데이터를 요청하는 중 예상치 못한 오류가 발생했습니다.');
+          console.error(err);
+        }
       } finally {
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
 
     loadData();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  // 애니메이션 프레임 활용
-  const { fps } = useAnimationFrame(
-    _timestamp => {
-      // 현재 시간 업데이트
-      setCurrentTime(prevTime => {
-        // 이미 종료 시간에 도달한 경우 재생 중지
-        if (prevTime >= endTime) {
-          setIsPlaying(false);
-          return endTime;
-        }
+  // 애니메이션 업데이트 콜백
+  const animationCallback = useCallback(() => {
+    // 현재 시간 업데이트
+    setCurrentTime(prevTime => {
+      // 이미 종료 시간에 도달한 경우 재생 중지
+      if (prevTime >= endTime) {
+        setIsPlaying(false);
+        return endTime;
+      }
 
-        // 타임스탬프 간격 (5분 = 300000ms)
-        const interval = 300000;
-        return Math.min(prevTime + interval, endTime);
-      });
-    },
-    {
+      // 타임스탬프 간격 (5분 = 300000ms)
+      const interval = 300000;
+      return Math.min(prevTime + interval, endTime);
+    });
+  }, [endTime, setIsPlaying]);
+
+  // 애니메이션 프레임 설정
+  const animationOptions = useMemo(
+    () => ({
       enabled: isPlaying,
       fpsLimit: 30,
       speed: speed,
-    }
+    }),
+    [isPlaying, speed]
   );
 
-  // 재생 컨트롤
-  const handlePlayPause = () => {
+  // 애니메이션 프레임 활용
+  const { fps } = useAnimationFrame(animationCallback, animationOptions);
+
+  // 재생/일시정지 토글
+  const handlePlayPause = useCallback(() => {
     setIsPlaying(prev => !prev);
-  };
+  }, []);
 
-  // 리셋 컨트롤
-  const handleReset = () => {
-    setIsPlaying(false);
+  // 초기화 핸들러
+  const handleReset = useCallback(() => {
     setCurrentTime(startTime);
-  };
+    setIsPlaying(false);
+  }, [startTime]);
 
-  // 속도 조절
-  const handleSpeedChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newSpeed = parseFloat(e.target.value);
-    setSpeed(newSpeed);
-  };
+  // 속도 변경 핸들러
+  const handleSpeedChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setSpeed(Number(e.target.value));
+  }, []);
 
-  // 현재 데이터 필터링 (현재 시간까지의 데이터만 표시)
-  const filteredData = chartData.filter(d => d.timestamp <= currentTime);
-
-  // 현재 날짜 및 시간 포맷팅
-  const formattedDate = currentTime ? format(new Date(currentTime), 'yyyy-MM-dd') : '';
-  const formattedTime = currentTime ? format(new Date(currentTime), 'HH:mm:ss') : '';
-
-  // 진행률 계산
-  const progress =
-    currentTime && startTime && endTime
-      ? Math.round(((currentTime - startTime) / (endTime - startTime)) * 100)
-      : 0;
+  // 차트 렌더링 옵션
+  const chartOptions = useMemo(
+    () => ({
+      currentTimestamp: currentTime,
+      isAnimating: isPlaying,
+    }),
+    [currentTime, isPlaying]
+  );
 
   return (
     <PageContainer>
       <Header>
-        <BackLink to="/visualizer">← 시각화 방식 선택으로 돌아가기</BackLink>
-        <Title>SVG 차트 시각화</Title>
+        <Title>SVG 기반 차트 시각화</Title>
+        <BackLink to="/visualizer">← 뒤로 가기</BackLink>
       </Header>
 
-      {loading ? (
-        <div>데이터를 로드하는 중...</div>
-      ) : error ? (
-        <div>오류: {error}</div>
-      ) : (
-        <>
-          <InfoPanel>
-            <InfoItem>
-              <InfoLabel>날짜</InfoLabel>
-              <InfoValue>{formattedDate}</InfoValue>
-            </InfoItem>
-            <InfoItem>
-              <InfoLabel>시간</InfoLabel>
-              <InfoValue>{formattedTime}</InfoValue>
-            </InfoItem>
-            <InfoItem>
-              <InfoLabel>데이터 포인트</InfoLabel>
-              <InfoValue>
-                {filteredData.length} / {chartData.length}
-              </InfoValue>
-            </InfoItem>
-            <InfoItem>
-              <InfoLabel>진행률</InfoLabel>
-              <InfoValue>{progress}%</InfoValue>
-            </InfoItem>
-            <InfoItem>
-              <InfoLabel>FPS</InfoLabel>
-              <InfoValue>{fps}</InfoValue>
-            </InfoItem>
-          </InfoPanel>
+      {error && <div style={{ color: 'red', margin: '1rem 0' }}>{error}</div>}
 
-          <ChartContainer>
-            <SVGRenderer
-              width={1150}
-              height={500}
-              data={chartData}
-              options={{
-                currentTimestamp: currentTime,
-                isAnimating: isPlaying,
-                useSVGAnimation: true,
-              }}
-            />
-          </ChartContainer>
+      <ChartContainer>
+        {loading ? (
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              height: '100%',
+            }}
+          >
+            로딩 중...
+          </div>
+        ) : (
+          <SVGRenderer width={1000} height={500} data={chartData} options={chartOptions} />
+        )}
+      </ChartContainer>
 
-          <ControlPanel>
-            <ControlGroup>
-              <Button onClick={handlePlayPause}>{isPlaying ? '일시정지' : '재생'}</Button>
-              <Button onClick={handleReset} disabled={currentTime === startTime}>
-                처음으로
-              </Button>
-            </ControlGroup>
+      <ControlPanel>
+        <ControlGroup>
+          <Button onClick={handlePlayPause} disabled={loading || chartData.length === 0}>
+            {isPlaying ? '일시정지' : '재생'}
+          </Button>
+          <Button onClick={handleReset} disabled={loading || chartData.length === 0}>
+            초기화
+          </Button>
+        </ControlGroup>
 
-            <SpeedControl>
-              <SpeedLabel>속도:</SpeedLabel>
-              <Slider
-                type="range"
-                min="0.1"
-                max="10"
-                step="0.1"
-                value={speed}
-                onChange={handleSpeedChange}
-              />
-              <SpeedValue>{speed.toFixed(1)}x</SpeedValue>
-            </SpeedControl>
-          </ControlPanel>
-        </>
-      )}
+        <SpeedControl>
+          <SpeedLabel>속도:</SpeedLabel>
+          <Slider
+            type="range"
+            min="0.5"
+            max="5"
+            step="0.5"
+            value={speed}
+            onChange={handleSpeedChange}
+            disabled={loading}
+          />
+          <SpeedValue>{speed}x</SpeedValue>
+        </SpeedControl>
+      </ControlPanel>
+
+      <InfoPanel>
+        <InfoItem>
+          <InfoLabel>현재 시간</InfoLabel>
+          <InfoValue>{format(new Date(currentTime), 'yyyy-MM-dd HH:mm')}</InfoValue>
+        </InfoItem>
+        <InfoItem>
+          <InfoLabel>FPS</InfoLabel>
+          <InfoValue>{fps}</InfoValue>
+        </InfoItem>
+        <InfoItem>
+          <InfoLabel>데이터 포인트</InfoLabel>
+          <InfoValue>{chartData.length}</InfoValue>
+        </InfoItem>
+      </InfoPanel>
     </PageContainer>
   );
-};
-
-export default SVGVisualizerPage;
+}

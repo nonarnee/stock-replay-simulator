@@ -69,6 +69,11 @@ export function useAnimationFrame(
       if (initialTimeRef.current === null) {
         initialTimeRef.current = time;
         simulatedTimeRef.current = startTimestamp || time;
+        console.log('Animation initialized:', {
+          initialTime: initialTimeRef.current,
+          startTimestamp: startTimestamp,
+          simulatedTime: simulatedTimeRef.current,
+        });
       }
 
       // FPS 계산
@@ -80,21 +85,48 @@ export function useAnimationFrame(
         fpsCounterRef.current.lastUpdate = time;
       }
 
-      // 델타 타임 계산
-      const deltaTime = previousTimeRef.current ? time - previousTimeRef.current : 0;
+      // 델타 타임 계산 및 반올림
+      const rawDeltaTime = previousTimeRef.current ? time - previousTimeRef.current : 0;
+      const deltaTime = Math.round(rawDeltaTime);
+
+      // 성능 최적화: 프레임 건너뛰기
+      // 매우 짧은 시간 간격(16ms = 약 60fps)으로 호출되면 처리 건너뛰기
+      const minFrameInterval = 16; // 약 60fps
+      if (deltaTime < minFrameInterval && previousTimeRef.current !== null) {
+        requestRef.current = requestAnimationFrame(animate);
+        return;
+      }
 
       // 시뮬레이션 시간 계산 (속도 적용)
       if (simulatedTimeRef.current !== null) {
-        simulatedTimeRef.current += deltaTime * speed;
+        const adjustedDelta = Math.round(deltaTime * speed);
+        simulatedTimeRef.current += adjustedDelta;
+
+        // 로그 주기 제한 (100번에 1번만 로그)
+        if (fpsCounterRef.current.frames % 100 === 0) {
+          console.log('Animation frame:', {
+            deltaTime,
+            adjustedDelta,
+            simulatedTime: simulatedTimeRef.current,
+            fps: fps || 0,
+          });
+        }
       }
 
       // 종료 타임스탬프 체크
       if (endTimestamp !== null && simulatedTimeRef.current! >= endTimestamp) {
+        console.log('Animation reached end timestamp:', {
+          endTimestamp,
+          simulatedTime: simulatedTimeRef.current,
+        });
+
         if (loop) {
           // 반복 재생인 경우 시작점으로 되돌림
+          console.log('Animation looping back to start');
           simulatedTimeRef.current = startTimestamp || initialTimeRef.current;
         } else {
           // 반복이 아닌 경우 정지
+          console.log('Animation stopping (end reached, no loop)');
           setIsPlaying(false);
           return;
         }
@@ -110,8 +142,12 @@ export function useAnimationFrame(
 
       // 콜백 호출
       if (shouldRender) {
-        callback(simulatedTimeRef.current!, deltaTime, provideFps ? fps : undefined);
-        previousTimeRef.current = time;
+        try {
+          callback(simulatedTimeRef.current!, deltaTime, provideFps ? fps : undefined);
+          previousTimeRef.current = time;
+        } catch (error) {
+          console.error('애니메이션 프레임 콜백 실행 중 오류:', error);
+        }
       }
 
       // 다음 프레임 요청
